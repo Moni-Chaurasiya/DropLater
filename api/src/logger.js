@@ -1,2 +1,2 @@
-const peno= required('peno');
-module.exports=pino({level:process.env.LOG_LEVEL || 'info'});
+const peno= require('peno');
+module.exports=pino({level:'info'});
