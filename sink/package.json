@@ -1,0 +1,14 @@
+{
+  "name": "droplater-sink",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "node src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ioredis": "^5.4.1",
+    "pino": "^9.2.0"
+  }
+}
