@@ -1,8 +1,10 @@
 const express = require('express');
 const {z} = require('zod');
 const Note = require('../models/Notes');
+const dayjs = require('dayjs');
 const log = require('../logger');
 const router = express.Router();
+const {Queue} = require('bullmq');
 
 const createSchema=z.object({
     title:z.string().min(1).max(200),
@@ -10,6 +12,10 @@ const createSchema=z.object({
     releaseAt: z.string().datetime(),
     webhookUrl: z.string().url(),
 })
+
+function getQueue(){
+     return new Queue('deliveries',{connection:{url:process.env.REDIS_URL}});
+}
 
 router.post('/', async(req,res)=>{
 
@@ -19,9 +25,15 @@ router.post('/', async(req,res)=>{
         return res.status(400).json({error:'Invalid payload', issues: parsed.error.issues});
        }
        const {title,body,releaseAt,webhookUrl} = parsed.data;
+       const releaseDate = dayjs(releaseAt).toDate();
        
-       const note=await Note.crete({title,body,releaseAt,webhookUrl,status:'pending'});
-       log.info({noteId: note._id}, 'Note created successfully');
+       const note=await Note.crete({title,body,releaseAt:releaseDate,webhookUrl,status:'pending'});
+       if(dayjs(releaseDate).isBefore(dayjs())){
+        const q =getQueue();
+        await q.add('deliver',{noteId: note._id.toString()});
+       }
+       return res.status(201).json({id:note._id.toString(), message:'Note created successfully'});
+
     }catch(err){
         log.error({err},'Error creating note');
         return res.status(500).json({error:'server error'});
@@ -73,6 +85,10 @@ router.post('/:id/replay', async(req,res)=>{
     note.status='pending';
     await note.save();
 
+    const q= getQueue();
+    await q.add('deliver', {
+        noteId: note._id.toString()
+    });
     return res.json({message:'Note replayed successfully'});
 });
 
