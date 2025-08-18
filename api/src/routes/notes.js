@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const {z} = require('zod');
 const Note = require('../models/Notes');
