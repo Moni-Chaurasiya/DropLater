@@ -119,3 +119,4 @@ dist
 
 # End of https://mrkandreev.name/snippets/gitignore-generator/#Node
 .vercel
+package-lock.json
