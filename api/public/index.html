@@ -1,0 +1,186 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DropLater Admin</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
+      .row-delivered { outline: 2px solid #4caf50; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ddd; padding: 8px; }
+      th { background: #f5f5f5; }
+      .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
+      input, select, button, textarea { padding: 8px; font-size: 14px; }
+      .muted { color: #666; font-size: 12px; }
+      .container { max-width: 1000px; margin: 0 auto; }
+    </style>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/gsap@3.12.5/dist/gsap.min.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <h1>DropLater Admin</h1>
+      <div id="root"></div>
+    </div>
+
+    <script type="text/babel">
+      const API_BASE = '';
+      const ADMIN_TOKEN = prompt('Enter admin token (from .env ADMIN_TOKEN)');
+
+      function useFetchNotes(status, page) {
+        const [data, setData] = React.useState({ items: [], page: 1, total: 0, pageSize: 20 });
+        const [loading, setLoading] = React.useState(false);
+        React.useEffect(() => {
+          async function go() {
+            setLoading(true);
+            const qs = new URLSearchParams();
+            if (status) qs.set('status', status);
+            if (page) qs.set('page', String(page));
+            const res = await fetch(`${API_BASE}/api/notes?${qs.toString()}`, {
+              headers: { Authorization: `Bearer ${ADMIN_TOKEN}` }
+            });
+            setData(await res.json());
+            setLoading(false);
+          }
+          go();
+        }, [status, page]);
+        return { data, loading };
+      }
+
+      function CreateForm({ onCreated }) {
+        const [form, setForm] = React.useState({ title: '', body: '', releaseAt: '', webhookUrl: 'http://localhost:4000/sink' });
+        const [msg, setMsg] = React.useState('');
+        const onChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+        const submit = async (e) => {
+          e.preventDefault();
+          setMsg('');
+          const res = await fetch('/api/notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ADMIN_TOKEN}` },
+            body: JSON.stringify(form)
+          });
+          const j = await res.json();
+          if (res.ok) { setMsg('Created: ' + j.id); onCreated?.(); } else { setMsg('Error: ' + (j.error || '')); }
+        };
+        return (
+          <form onSubmit={submit} style={{ display:'grid', gap:8, maxWidth: 600, marginBottom: 16 }}>
+            <h3>Create note</h3>
+            <input name="title" placeholder="Title" value={form.title} onChange={onChange} required />
+            <textarea name="body" placeholder="Body" rows={4} value={form.body} onChange={onChange} required />
+            <input name="releaseAt" placeholder="ISO time (UTC)" value={form.releaseAt} onChange={onChange} required />
+            <div className="muted">Example: 2020-01-01T00:00:10.000Z. Past times trigger quickly.</div>
+            <input name="webhookUrl" placeholder="Webhook URL" value={form.webhookUrl} onChange={onChange} required />
+            <button>Save</button>
+            <div className="muted">{msg}</div>
+          </form>
+        );
+      }
+
+      function Table() {
+        const [status, setStatus] = React.useState('');
+        const [page, setPage] = React.useState(1);
+        const { data, loading } = useFetchNotes(status, page);
+        const [pulseId, setPulseId] = React.useState(null);
+
+        const replay = async (id) => {
+          const res = await fetch(`/api/notes/${id}/replay`, { method: 'POST', headers: { Authorization: `Bearer ${ADMIN_TOKEN}` } });
+          if (!res.ok) alert('Replay failed');
+        };
+
+        React.useEffect(() => {
+          const t = setInterval(async () => {
+            const qs = new URLSearchParams();
+            if (status) qs.set('status', status);
+            qs.set('page', String(page));
+            const res = await fetch(`/api/notes?${qs.toString()}`, { headers: { Authorization: `Bearer ${ADMIN_TOKEN}` } });
+            const j = await res.json();
+            const delivered = j.items.find((i) => i.status === 'delivered');
+            if (delivered) {
+              setPulseId(delivered.id);
+              requestAnimationFrame(() => {
+                const el = document.querySelector(`[data-row-id="${delivered.id}"]`);
+                if (el) {
+                  gsap.fromTo(el, { backgroundColor: '#e8f5e9' }, { backgroundColor: 'white', duration: 1.5 });
+                }
+              });
+            }
+          }, 3000);
+          return () => clearInterval(t);
+        }, [status, page]);
+
+        return (
+          <div>
+            <div className="controls">
+              <label>Status:</label>
+              <select value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="">(all)</option>
+                <option value="pending">pending</option>
+                <option value="delivered">delivered</option>
+                <option value="failed">failed</option>
+                <option value="dead">dead</option>
+              </select>
+              <button onClick={() => setPage(Math.max(1, page - 1))}>Prev</button>
+              <span>Page {page}</span>
+              <button onClick={() => setPage(page + 1)}>Next</button>
+            </div>
+            {loading ? <div>Loading…</div> : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Title</th>
+                    <th>Status</th>
+                    <th>ReleaseAt</th>
+                    <th>Last Code</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+              <tbody>
+  {Array.isArray(data.items) && data.items.length > 0 ? (
+    data.items.map((n) => (
+      <tr key={n.id} data-row-id={n.id} className={n.id === pulseId ? 'row-delivered' : ''}>
+        <td style={{maxWidth:200, overflow:'hidden', textOverflow:'ellipsis'}} title={n.id}>{n.id}</td>
+        <td>{n.title}</td>
+        <td>{n.status}</td>
+        <td>{new Date(n.releaseAt).toISOString()}</td>
+        <td>{n.lastAttemptCode ?? '-'}</td>
+        <td>
+          {['failed','dead'].includes(n.status) && (
+            <button onClick={() => replay(n.id)}>Replay</button>
+          )}
+        </td>
+      </tr>
+    ))
+  ) : (
+    <tr>
+      <td colSpan={6} style={{ textAlign: "center" }}>
+        {loading ? "Loading…" : "No data or server error"}
+      </td>
+    </tr>
+  )}
+</tbody>
+
+              </table>
+            )}
+          </div>
+        );
+      }
+
+      function App() {
+        const [refresh, setRefresh] = React.useState(0);
+        return (
+          <>
+            <CreateForm onCreated={() => setRefresh((x) => x + 1)} />
+            <Table key={refresh} />
+          </>
+        );
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+  </body>
+</html>
